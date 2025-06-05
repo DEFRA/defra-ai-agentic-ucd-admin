@@ -6,7 +6,7 @@ kanban-plugin: board
 
 ## To Do
 
-- [ ] Fix the reference to local endpoint for the S3 bucket code
+- [ ] Fix the reference to local variable name endpoint for the S3 bucket code
 
 
 ## Doing
