@@ -1,4 +1,3 @@
-
 # Research Analysis Backend – MongoDB Data Model (v2)
 
 ## 1. Collections & Fields
@@ -18,7 +17,7 @@
 
 | Field                       | Type            | Notes                                                       |
 | --------------------------- | --------------- | ----------------------------------------------------------- |
-| **process_start_date**      | `Date`          | Set when `/start` is invoked.                               |
+| **process_start_date**      | `Date`          | Set when status is updated to `RUNNING`.                    |
 | **transcripts**             | `Array<String>` | **Full raw transcript text** (markdown).                    |
 | **transcripts_pii_cleaned** | `Array<String>` | **PII‑scrubbed transcript text**.                           |
 | **affinity_map**            | `String`        | Markdown content of the generated affinity map.             |

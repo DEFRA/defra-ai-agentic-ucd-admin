@@ -26,7 +26,7 @@ A research-operations team needs an automated backend that ingests raw user-rese
 
 |Field|Type|Notes|
 |---|---|---|
-|`process_start_date`|Date|Filled by `/start`|
+|`process_start_date`|Date|Filled by status update to `RUNNING`|
 |`transcripts`|Array<String>|Raw markdown text|
 |`transcripts_pii_cleaned`|Array<String>|PII-scrubbed text|
 |`affinity_map`|String|Markdown|
@@ -60,7 +60,8 @@ A research-operations team needs an automated backend that ingests raw user-rese
 |**1.1**|Create Analysis Session|
 |**1.2**|List Analysis Sessions|
 |**1.3**|Retrieve Analysis Session (with agent state)|
-|**1.4**|Delete Analysis Session|
+|**1.4**|Update Analysis Session Status|
+|**1.5**|Delete Analysis Session|
 
 ---
 
@@ -123,7 +124,29 @@ A research-operations team needs an automated backend that ingests raw user-rese
 
 ---
 
-#### **Story 1.4 – Delete Analysis Session**
+#### **Story 1.4 – Update Analysis Session Status**
+
+- **As a** client
+- **I want** to update a session's status to trigger workflow execution
+- **so that** the system can start processing uploaded transcripts.
+
+##### Acceptance Criteria
+
+| Given                                                                      | When                                                    | Then                                                                                                                                                                                                                                                                                                             |
+| -------------------------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| session `status = FILES_UPLOADED` and request body `{"status": "RUNNING"}` | the client `PATCH`es **/api/v1/research-analyses/{id}** | • Server responds **200** with updated session object.• `status` field updated to `RUNNING`.• `process_start_date` set (UTC) in `agent_state`.• Background job queued.• Initial `agent_state.status = STARTING`.• Operation is **idempotent** - repeated PATCH requests with same status maintain current state. |
+| session `status = RUNNING` and request body `{"status": "RUNNING"}`        | the client `PATCH`es **/api/v1/research-analyses/{id}** | • Server responds **200** with current session object.• No state changes occur (idempotent behavior).• No additional background jobs are queued.                                                                                                                                                                 |
+| invalid `status` value provided                                            | the client `PATCH`es **/api/v1/research-analyses/{id}** | • Server responds **400** with error object (`code = INVALID_STATUS`).                                                                                                                                                                                                                                           |
+
+##### Architecture Design Notes
+
+- Validates status transition rules (e.g., can only move to `RUNNING` from `FILES_UPLOADED` or stay at `RUNNING`).
+- Idempotent operation - duplicate requests with same status are safe.
+- Only queues background job on actual state transition.
+
+---
+
+#### **Story 1.5 – Delete Analysis Session**
 
 - **As a** client
 - **I want** to permanently delete a session and its transcript files
@@ -161,7 +184,7 @@ A research-operations team needs an automated backend that ingests raw user-rese
 
 |Given|When|Then|
 |---|---|---|
-|session `status ∈ {INIT, FILES_UPLOADED}`|client `POST`s **multipart/form-data** to **/api/v1/research-analyses/{id}/transcripts**|• Each part has `Content-Type` `text/markdown` or `text/plain` and filename ends `.md`/`.txt`.• Invalid files → **400** (`code = UNSUPPORTED_FILE_TYPE`).• For each valid file:  – Streamed to S3 under `research/{analysis_id}/`.  – `analysis_file` doc written.• Response **201** with array of new `analysis_file` objects.• Parent `status` becomes `FILES_UPLOADED` if it was `INIT`.|
+|session `status ∈ {INIT, FILES_UPLOADED}`|client `POST`s **multipart/form-data** to **/api/v1/research-analyses/{id}/transcripts**|• Each part has `Content-Type` `text/markdown` or `text/plain` and filename ends `.md`/`.txt`.• Invalid files → **400** (`code = UNSUPPORTED_FILE_TYPE`).• For each valid file:  – Streamed to S3 under `research/{analysis_id}/`.  – `analysis_file` doc written.• Response **201** with array of new `analysis_file` objects.• Parent `status` becomes `FILES_UPLOADED` if it was `INIT`.|
 
 ##### Architecture Design Notes
 
@@ -194,28 +217,29 @@ A research-operations team needs an automated backend that ingests raw user-rese
 
 |#|Story Title|
 |---|---|
-|**3.1**|Start Analysis Workflow|
+|**3.1**|Status-based Workflow Triggering|
 |**3.2**|Persist Fine-grained Agent State|
 |**3.3**|Update Coarse Session Statuses|
 
 ---
 
-#### **Story 3.1 – Start Analysis Workflow**
+#### **Story 3.1 – Status-based Workflow Triggering**
 
 - **As a** client
-- **I want** to start the agentic workflow after transcripts are ready
+- **I want** to trigger the agentic workflow by updating session status
 - **so that** the system produces an affinity map and findings report.
 
 ##### Acceptance Criteria
 
 |Given|When|Then|
 |---|---|---|
-|session `status = FILES_UPLOADED`|client `POST`s **/api/v1/research-analyses/{id}/start**|• Server responds **202** with `status = RUNNING`.• `process_start_date` set (UTC).• Background job queued.• Initial `agent_state.status = STARTING`.|
+|session `status = FILES_UPLOADED`|client `PATCH`es **/api/v1/research-analyses/{id}** with `{"status": "RUNNING"}`|• Server responds **200** with updated session object.• `status` field becomes `RUNNING`.• `process_start_date` set (UTC) in `agent_state`.• Background job queued.• Initial `agent_state.status = STARTING`.• Subsequent identical PATCH requests are idempotent and don't queue additional jobs.|
 
 ##### Architecture Design Notes
 
-- Starts async job (i.e. LangGraph).
-- Duplicate start requests → **409 Conflict**.
+- Status update triggers async job (i.e. LangGraph).
+- Idempotent operation prevents duplicate job queueing.
+- Clear separation between coarse API status and fine-grained agent status.
 
 ---
 
@@ -239,7 +263,7 @@ Standardise error payloads across all endpoints.
 
 |Given|When|Then|
 |---|---|---|
-|an endpoint encounters validation or runtime error|response is returned|• HTTP status code reflects error class (400, 404, 409, 500).• Body matches:`{ "status": "ERROR", "error_message": "<text>", "code": "<MACHINE_CODE>" }`.• `code` is optional for 500s but present for deterministic errors (e.g., `UNSUPPORTED_FILE_TYPE`).|
+|an endpoint encounters validation or runtime error|response is returned|• HTTP status code reflects error class (400, 404, 409, 500).• Body matches:`{ "status": "ERROR", "error_message": "<text>", "code": "<MACHINE_CODE>" }`.• `code` is optional for 500s but present for deterministic errors (e.g., `UNSUPPORTED_FILE_TYPE`, `INVALID_STATUS`).|
 
 ##### Architecture Design Notes
 

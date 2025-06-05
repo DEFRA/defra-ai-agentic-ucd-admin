@@ -12,6 +12,7 @@ Unless stated otherwise, the payload format is `application/json` and IDs are Mo
 | **POST**   | `/api/v1/research-analyses`      | Create a new session                          |
 | **GET**    | `/api/v1/research-analyses`      | List all sessions                             |
 | **GET**    | `/api/v1/research-analyses/{id}` | Retrieve one session (includes `agent_state`) |
+| **PATCH**  | `/api/v1/research-analyses/{id}` | Update session status                         |
 | **DELETE** | `/api/v1/research-analyses/{id}` | Hard-delete a session (admin-only)            |
 |            |                                  |                                               |
 
@@ -80,6 +81,32 @@ Response 201
 }
 ```
 
+#### 1.4 Update session status
+
+`PATCH /api/v1/research-analyses/{id}`
+
+```jsonc
+Request Body
+{
+  "status": "RUNNING"
+}
+```
+
+```jsonc
+Response 200
+{
+  "_id": "661c0a7b8f45cc46d0f9f2c1",
+  "created_at": "2025-06-04T14:05:21.381Z",
+  "status": "RUNNING",
+  "error_message": null,
+  "agent_state": {
+    "process_start_date": "2025-06-04T14:06:04.002Z",
+    "status": "STARTING",
+    "error_message": null
+  }
+}
+```
+
 ---
 
 ### 2. Transcript Uploads
@@ -121,31 +148,7 @@ Response 201
 
 ---
 
-### 3. Workflow Control
-
-|Verb|Endpoint|Purpose|
-|---|---|---|
-|**POST**|`/api/v1/research-analyses/{id}/start`|Begin the async agentic workflow|
-
-`POST /api/v1/research-analyses/{id}/start`
-
-```http
-Request Body   # empty; the path ID is sufficient
-{}
-```
-
-```jsonc
-Response 202
-{
-  "message": "Analysis run queued.",
-  "analysis_id": "661c0a7b8f45cc46d0f9f2c1",
-  "status": "RUNNING"
-}
-```
-
----
-
-### 4. Error Object (shared shape)
+### 3. Error Object (shared shape)
 
 ```jsonc
 {
@@ -157,7 +160,7 @@ Response 202
 
 ---
 
-`## Example Sequence (Happy Path)
+## Example Sequence (Happy Path)
 
 1. **Create session** → `POST /research-analyses`  
     → returns `_id = 661c0a7b…`, `status = INIT`
@@ -165,7 +168,7 @@ Response 202
 2. **Upload transcripts** → `POST /research-analyses/{id}/transcripts`  
     → server records files, may update `status` internally
     
-3. **Kick off workflow** → `POST /research-analyses/{id}/start`  
+3. **Start workflow** → `PATCH /research-analyses/{id}` with `{"status": "RUNNING"}`  
     → returns `status = RUNNING`
     
 4. **Poll session** → `GET /research-analyses/{id}` until processing finishes (`status = COMPLETED` or `ERROR`).
